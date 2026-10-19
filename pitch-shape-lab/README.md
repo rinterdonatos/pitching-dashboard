@@ -3,7 +3,7 @@
 Turns a TrackMan bullpen export into a scouting-style report: the five closest MLB comps for every
 pitch, how those comps actually performed, and a model-based "stuff" score.
 
-**Live sample report (my bullpen):** https://rinterdonatos.github.io/pitching-dashboard/pitch-shape-lab/
+**Live lab (switch pitchers, filter by date):** https://rinterdonatos.github.io/pitching-dashboard/
 
 ## What it does
 
@@ -28,7 +28,8 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install pandas numpy scikit-learn pybaseball plotly
 .venv\Scripts\python.exe fetch_statcast.py 2025     # ~10 min, writes data/
 .venv\Scripts\python.exe lab.py build 2025          # reference arsenals + whiff model
-.venv\Scripts\python.exe report.py my_bullpen.csv report.html
+.venv\Scripts\python.exe report.py my_bullpen.csv report.html          # one pitcher, static report
+.venv\Scripts\python.exe site.py index.html "Name=a.csv;b.csv" "Other=c.csv"  # interactive: pitcher tabs + date range
 ```
 
 Input is a standard TrackMan CSV (TaggedPitchType, RelSpeed, SpinRate, InducedVertBreak, HorzBreak,
