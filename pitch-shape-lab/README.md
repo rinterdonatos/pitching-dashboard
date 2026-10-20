@@ -20,7 +20,7 @@ closest MLB comps, and how those comps actually performed.
 - **Comps:** standardized distance on velocity, induced vertical break, horizontal break, spin, release
   height and extension within the same pitch family (movement weighted most), with each comp's Stuff+,
   whiff rate and run value per 100 pitches.
-- **Site:** pick a pitcher and a date range; the arsenal table, Stuff+, movement profile against every MLB
+- **Site:** pick a pitcher and a date range, or upload your own TrackMan CSV (read in your browser, never uploaded); the arsenal table, Stuff+, movement profile against every MLB
   pitch, notes on separation off the fastball, and comps all recompute in the browser.
 
 ## Run it

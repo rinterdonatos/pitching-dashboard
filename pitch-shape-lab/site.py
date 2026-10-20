@@ -52,7 +52,7 @@ def build(out: str, pitchers: dict[str, list[str]], year: int = 2025, img_base: 
                  "ivbs": sorted(round(float(v), 1) for v in f["ivb"])}
              for t, f in ref.groupby("pitch_type")}
     payload = {"pitchers": data, "ref": refrows, "fam": fam, "types": types, "names": lab.NAMES,
-               "group": lab.GROUP, "colors": COLORS, "tint": FAMILY_TINT, "meta": meta, "stuff": stuff}
+               "group": lab.GROUP, "colors": COLORS, "tint": FAMILY_TINT, "meta": meta, "stuff": stuff, "trackman": lab.TRACKMAN}
 
     page = (PAGE.replace("__DATA__", json.dumps(payload, separators=(",", ":")))
                 .replace("__IMG__", img_base)
@@ -91,6 +91,9 @@ header.hero { position:relative; overflow:hidden; background:radial-gradient(120
 .who select { font:inherit; font-weight:600; color:var(--ink); padding:7px 34px 7px 12px; border:1px solid var(--line); border-radius:10px;
   background:#f7f9fb url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2314202b' stroke-width='1.6' fill='none'/%3E%3C/svg%3E") no-repeat right 12px center;
   appearance:none; cursor:pointer; min-width:220px }
+.upload { font-weight:600; color:#1f5fa8; border:1px dashed #9db6d6; border-radius:10px; padding:7px 12px; cursor:pointer; background:#f5f9ff; font-size:14px }
+.upload:hover { background:#eaf2ff }
+.upmsg { font-size:13px; color:var(--ink2) } .upmsg.err { color:#b03a2e }
 .dates { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-left:auto; color:var(--ink2); font-size:14px }
 .dates input { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:8px; color:var(--ink) }
 .dates button { font:inherit; border:0; background:none; color:#1f5fa8; cursor:pointer; padding:4px 6px }
@@ -130,6 +133,9 @@ footer a { color:var(--ink2); text-decoration:underline }
 <main class="wrap">
   <div class="controls">
     <label class="who">Pitcher <select id="who"></select></label>
+    <label class="upload" title="Your file is read in your browser and never uploaded anywhere">
+      <input type="file" id="file" accept=".csv,text/csv" hidden>Upload TrackMan CSV</label>
+    <span id="upmsg" class="upmsg"></span>
     <div class="dates">From <input type="date" id="from"> to <input type="date" id="to">
       <button id="all" type="button">All dates</button></div>
   </div>
@@ -318,7 +324,81 @@ function pick(name) {
   render();
 }
 
-$("#who").innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)} (${D.pitchers[n].hand})</option>`).join("");
+function fillWho() {
+  $("#who").innerHTML = Object.keys(D.pitchers).map(n => `<option value="${esc(n)}">${esc(n)} (${D.pitchers[n].hand})</option>`).join("");
+}
+fillWho();
+
+// ---- upload: parse a TrackMan CSV entirely in the browser ----
+function parseCSV(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim() !== ""));
+}
+
+function isoDate(v) {
+  if (!v) return null;
+  let m = String(v).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+function loadTrackman(text, fileName) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error("That file has no pitch rows.");
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/^\ufeff/, ""));
+  const col = (...names) => names.map(n => head.indexOf(n)).find(i => i >= 0);
+  const C = {who: col("pitcher"), hand: col("pitcherthrows"), date: col("date"),
+    type: col("taggedpitchtype", "autopitchtype", "pitchtype"), v: col("relspeed", "velocity"),
+    s: col("spinrate"), ivb: col("inducedvertbreak", "verticalbreak"), hb: col("horzbreak", "horizontalbreak"),
+    rz: col("relheight"), rx: col("relside"), ext: col("extension")};
+  if ([C.type, C.v, C.ivb, C.hb].some(i => i == null))
+    throw new Error("Couldn't find the pitch type, velocity and break columns (TaggedPitchType, RelSpeed, InducedVertBreak, HorzBreak).");
+  const num = (r, i) => { if (i == null) return null; const x = parseFloat(r[i]); return isNaN(x) ? null : x; };
+  let pitches = rows.slice(1).map(r => ({
+    d: isoDate(C.date != null ? r[C.date] : null) || new Date().toISOString().slice(0, 10),
+    t: D.trackman[String(r[C.type] || "").toLowerCase().replace(/\s+/g, "")],
+    v: num(r, C.v), s: num(r, C.s), ivb: num(r, C.ivb), hb: num(r, C.hb),
+    rz: num(r, C.rz), rx: num(r, C.rx), ext: num(r, C.ext)}))
+    .filter(p => p.t && p.v != null && p.ivb != null && p.hb != null);
+  if (!pitches.length) throw new Error("No pitches with a recognized pitch type, velocity and break.");
+  // Exports differ in sign conventions: orient so the fastball runs to the arm side (+).
+  const fb = pitches.filter(p => D.group[p.t] === "fastball");
+  if (fb.length && mean(fb.map(p => p.hb)) < 0) pitches.forEach(p => p.hb = -p.hb);
+  if (mean(pitches.map(p => p.rx)) < 0) pitches.forEach(p => { if (p.rx != null) p.rx = -p.rx; });
+  const first = rows[1];
+  let name = C.who != null ? String(first[C.who] || "").trim() : "";
+  if (name.includes(",")) name = name.split(",").map(x => x.trim()).reverse().join(" ");
+  name = name || fileName.replace(/\.[^.]+$/, "");
+  const throws = C.hand != null ? String(first[C.hand] || "R").trim()[0].toUpperCase() : "R";
+  return {name, hand: throws === "L" ? "LHP" : "RHP", pitches};
+}
+
+$("#file").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const msg = $("#upmsg"); msg.className = "upmsg";
+  try {
+    const p = loadTrackman(await file.text(), file.name);
+    let name = `${p.name} (uploaded)`, k = 2;
+    while (D.pitchers[name]) name = `${p.name} (uploaded ${k++})`;
+    D.pitchers[name] = {hand: p.hand, pitches: p.pitches};
+    fillWho(); pick(name);
+    msg.textContent = `Loaded ${p.pitches.length} pitches. Your file stays in your browser.`;
+  } catch (err) {
+    msg.className = "upmsg err"; msg.textContent = err.message;
+  }
+  e.target.value = "";
+};
 $("#who").onchange = e => pick(e.target.value);
 $("#from").onchange = render; $("#to").onchange = render;
 $("#all").onclick = () => { const [lo, hi] = dateBounds(); $("#from").value = lo; $("#to").value = hi; render(); };
