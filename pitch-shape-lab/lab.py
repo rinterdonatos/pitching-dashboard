@@ -185,8 +185,109 @@ def comps(pitch: pd.Series, ref: pd.DataFrame, k: int = 5) -> pd.DataFrame:
     return fam.nsmallest(k, "distance")
 
 
+# ---------------------------------------------------------------- Stuff+ (tjStuff+-style)
+
+# Pitch-type-agnostic physical traits plus separation from the pitcher's primary fastball.
+# Arm angle is left out because TrackMan bullpen exports don't report it.
+STUFF_FEATS = ["velo", "spin", "ivb", "hb", "rel_z", "rel_x", "ext", "d_velo", "d_ivb", "d_hb"]
+RESULT = {"ball": "ball", "blocked_ball": "ball", "pitchout": "ball", "intent_ball": "ball",
+          "called_strike": "called", "swinging_strike": "whiff", "swinging_strike_blocked": "whiff",
+          "foul_tip": "whiff", "missed_bunt": "whiff", "foul": "foul", "foul_bunt": "foul",
+          "bunt_foul_tip": "foul", "hit_into_play": "bip", "hit_by_pitch": "hbp"}
+
+
+def impute(rows: pd.DataFrame, ref: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing traits (e.g. no release data in a bullpen file) with the MLB average for the
+    same pitch family, so a missing measurement counts as average rather than skewing the score."""
+    rows = rows.copy()
+    fam_means = ref.groupby("group")[STUFF_FEATS].mean()
+    for c in STUFF_FEATS:
+        if c not in rows:
+            rows[c] = np.nan
+        rows[c] = rows[c].fillna(rows["group"].map(fam_means[c]))
+    return rows
+
+
+def build_stuff(year: int) -> None:
+    """Train a run-value model on every MLB pitch, then score pitch *averages* and scale to
+    Stuff+ (100 = average MLB pitch, 10 = one standard deviation)."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    raw = pd.read_csv(DATA / f"statcast_{year}.csv.gz", low_memory=False)
+    raw = raw[raw["pitch_type"].isin(GROUP)].dropna(subset=["delta_run_exp"])
+    # Expected run value: the league-average value of each (count, result) - ball, called strike,
+    # whiff, foul, ball in play, HBP - so batted-ball luck doesn't drown out the pitch's traits.
+    raw = raw.assign(result=raw["description"].map(RESULT).fillna("other"))
+    raw["xrv"] = -raw.groupby(["balls", "strikes", "result"])["delta_run_exp"].transform("mean")
+    df = add_fastball_deltas(normalize_statcast(raw))
+    df["run_value"] = raw.loc[df.index, "xrv"]
+    df = df.dropna(subset=["run_value"])
+    ref = pd.read_csv(DATA / f"reference_{year}.csv")
+    ref = ref.drop(columns=[c for c in ("xrv100", "stuff_raw", "stuff_plus") if c in ref])
+    ref = ref.merge(df.groupby(["pitcher", "pitch_type"])["run_value"].mean().mul(100).rename("xrv100")
+                    .reset_index(), on=["pitcher", "pitch_type"], how="left")
+
+    split = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=11)
+    tr, te = next(split.split(df, groups=df["pitcher"]))
+    params = dict(max_iter=400, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=200,
+                  l2_regularization=1.0, random_state=11)
+    m = HistGradientBoostingRegressor(**params).fit(df.iloc[tr][STUFF_FEATS], df.iloc[tr]["run_value"])
+    # Validation: score held-out pitchers' arsenal *averages*; compare with their expected and
+    # actual run value per 100 pitches.
+    held = ref[ref["pitcher"].isin(df.iloc[te]["pitcher"].unique())]
+    pred = m.predict(impute(held, ref)[STUFF_FEATS])
+    r_holdout = float(np.corrcoef(pred, held["xrv100"])[0, 1])
+    r_actual = float(np.corrcoef(pred, held["rv100"])[0, 1])
+
+    model = HistGradientBoostingRegressor(**params).fit(df[STUFF_FEATS], df["run_value"])
+    ref["stuff_raw"] = model.predict(impute(ref, ref)[STUFF_FEATS])
+    w = ref["n"]
+    mu = float(np.average(ref["stuff_raw"], weights=w))
+    sd = float(np.sqrt(np.average((ref["stuff_raw"] - mu) ** 2, weights=w)))
+    ref["stuff_plus"] = 100 + 10 * (ref["stuff_raw"] - mu) / sd
+    ref.to_csv(DATA / f"reference_{year}.csv", index=False)
+
+    with open(DATA / f"stuff_model_{year}.pkl", "wb") as f:
+        pickle.dump(model, f)
+    export = {"features": STUFF_FEATS, "base": float(np.ravel(model._baseline_prediction)[0]),
+              "mu": mu, "sd": sd, "trees": [export_tree(t[0]) for t in model._predictors],
+              "fam_means": {g: {c: float(v) for c, v in r.items()}
+                            for g, r in ref.groupby("group")[STUFF_FEATS].mean().iterrows()}}
+    (DATA / f"stuff_model_{year}.json").write_text(json.dumps(export, separators=(",", ":")))
+    meta = json.loads((DATA / f"meta_{year}.json").read_text())
+    meta.update({"stuff_holdout_r": round(r_holdout, 3), "stuff_holdout_r_actual": round(r_actual, 3),
+                 "stuff_trees": len(export["trees"])})
+    (DATA / f"meta_{year}.json").write_text(json.dumps(meta, indent=1))
+    print(json.dumps({k: meta[k] for k in ("stuff_holdout_r", "stuff_holdout_r_actual", "stuff_trees")}),
+          "\ntop MLB Stuff+:\n", ref.nlargest(8, "stuff_plus")[["player_name", "pitch_name", "velo", "stuff_plus"]])
+
+
+def export_tree(pred) -> list:
+    """sklearn TreePredictor -> compact [feature, threshold, left, right, value, leaf, missing_left]."""
+    return [[int(n["feature_idx"]), float(n["num_threshold"]), int(n["left"]), int(n["right"]),
+             round(float(n["value"]), 7), int(n["is_leaf"]), int(n["missing_go_to_left"])]
+            for n in pred.nodes]
+
+
+def stuff_from_json(model: dict, row: dict) -> float:
+    """Evaluate the exported trees exactly as the web page does (used to verify the export)."""
+    x = [row[f] for f in model["features"]]
+    raw = model["base"]
+    for tree in model["trees"]:
+        i = 0
+        while not tree[i][5]:
+            feat, thr, left, right, _, _, miss_left = tree[i]
+            v = x[feat]
+            i = (left if miss_left else right) if v is None or v != v else (left if v <= thr else right)
+        raw += tree[i][4]
+    return 100 + 10 * (raw - model["mu"]) / model["sd"]
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "build":
         build(int(sys.argv[2]) if len(sys.argv) > 2 else 2025)
+        build_stuff(int(sys.argv[2]) if len(sys.argv) > 2 else 2025)
+    elif len(sys.argv) >= 2 and sys.argv[1] == "stuff":
+        build_stuff(int(sys.argv[2]) if len(sys.argv) > 2 else 2025)
     else:
         print(__doc__)
