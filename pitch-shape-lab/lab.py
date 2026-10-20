@@ -160,7 +160,7 @@ def arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
 
 
 def score(a: pd.DataFrame, ref: pd.DataFrame, model) -> pd.DataFrame:
-    """Predicted whiff% per pitch, Whiff+ (100 = MLB average for that pitch family), percentile."""
+    """Predicted whiff% per pitch and its percentile among MLB pitches of the same family."""
     a = a.copy()
     a["xwhiff"] = 100 * model.predict_proba(a[FEATURES])[:, 1]
     plus, pct = [], []

@@ -1,7 +1,7 @@
 # Pitch Shape Lab
 
 Turns a TrackMan bullpen export into a scouting-style report: the five closest MLB comps for every
-pitch, how those comps actually performed, and a model-based "stuff" score.
+pitch, how those comps actually performed, and a predicted swing-and-miss rate.
 
 **Live lab (switch pitchers, filter by date):** https://rinterdonatos.github.io/pitching-dashboard/
 
@@ -16,10 +16,10 @@ pitch, how those comps actually performed, and a model-based "stuff" score.
 - **Whiff model:** a gradient-boosted classifier trained on 336K MLB swings predicts a miss from velocity,
   spin, movement, release point, extension, arm angle and separation from the pitcher's primary fastball.
   Validated on pitchers held out of training (ROC AUC 0.64). Location and count are excluded on purpose,
-  so the score reflects the pitch itself.
-- **Report:** an interactive HTML page (Plotly) with the arsenal table, xWhiff and Whiff+ (100 = MLB
-  average for the pitch family), the movement profile against every MLB pitch, and auto-written notes on
-  separation off the fastball.
+  so the prediction reflects the pitch itself.
+- **Site:** an interactive HTML page (Plotly) with a pitcher dropdown and date range. The arsenal table
+  shows xWhiff and its MLB percentile within the pitch family, plus the movement profile against every MLB
+  pitch and auto-written notes on separation off the fastball.
 
 ## Run it
 

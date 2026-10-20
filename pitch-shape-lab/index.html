@@ -19,9 +19,10 @@ header.hero { position:relative; overflow:hidden; background:radial-gradient(120
 .hero img.right { right:max(12px, calc(50% - 600px)) }
 .controls { position:relative; z-index:3; margin:-30px auto 18px; background:var(--card); border-radius:14px; padding:12px 14px;
   box-shadow:0 6px 22px rgba(16,30,45,.12); display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center }
-.tabs { display:flex; gap:6px; flex-wrap:wrap }
-.tabs button { border:1px solid var(--line); background:#f7f9fb; color:var(--ink); border-radius:999px; padding:7px 14px; font:inherit; font-weight:600; cursor:pointer }
-.tabs button.on { background:var(--navy); color:#fff; border-color:var(--navy) }
+.who { display:flex; gap:8px; align-items:center; color:var(--ink2); font-size:14px }
+.who select { font:inherit; font-weight:600; color:var(--ink); padding:7px 34px 7px 12px; border:1px solid var(--line); border-radius:10px;
+  background:#f7f9fb url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2314202b' stroke-width='1.6' fill='none'/%3E%3C/svg%3E") no-repeat right 12px center;
+  appearance:none; cursor:pointer; min-width:220px }
 .dates { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-left:auto; color:var(--ink2); font-size:14px }
 .dates input { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:8px; color:var(--ink) }
 .dates button { font:inherit; border:0; background:none; color:#1f5fa8; cursor:pointer; padding:4px 6px }
@@ -60,7 +61,7 @@ footer a { color:var(--ink2); text-decoration:underline }
 
 <main class="wrap">
   <div class="controls">
-    <div class="tabs" id="tabs"></div>
+    <label class="who">Pitcher <select id="who"></select></label>
     <div class="dates">From <input type="date" id="from"> to <input type="date" id="to">
       <button id="all" type="button">All dates</button></div>
   </div>
@@ -70,13 +71,13 @@ footer a { color:var(--ink2); text-decoration:underline }
       <div class="tile"><div class="l">Pitches</div><div class="v" id="tN"></div></div>
       <div class="tile"><div class="l">Top velo</div><div class="v" id="tVelo"></div></div>
       <div class="tile"><div class="l">Best bat-misser</div><div class="v" id="tBest" style="font-size:19px"></div></div>
-      <div class="tile"><div class="l">Its Whiff+</div><div class="v" id="tPlus"></div></div>
+      <div class="tile"><div class="l">Its xWhiff</div><div class="v" id="tPlus"></div></div>
     </div>
 
     <h2>Arsenal</h2>
     <div class="card"><table id="arsenal"></table>
       <p class="method">xWhiff = predicted swing-and-miss rate from shape, release and separation off the fastball.
-      Whiff+ = 100 × xWhiff / MLB average for that pitch family (100 is league average, 120 is 20% better).</p></div>
+      MLB percentile = share of MLB pitches in the same family (fastballs, cutters, breaking balls, offspeed) with a lower xWhiff.</p></div>
 
     <h2>Movement profile</h2>
     <div class="card"><div id="chart" style="height:600px"></div>
@@ -94,7 +95,7 @@ footer a { color:var(--ink2); text-decoration:underline }
   <div class="card method">
     <p><b>Data.</b> 707,107 regular-season pitches from 829 MLB pitchers (2025 Statcast via Baseball Savant), aggregated to one row per pitcher and pitch type (min. 100 pitches).</p>
     <p><b>Comps.</b> Standardized distance on velocity, induced vertical break, horizontal break, spin, release height and extension within the same pitch family; movement weighted most. Missing measurements (e.g. no release data) are left out of the distance.</p>
-    <p><b>Whiff model.</b> Gradient-boosted classifier trained on 336,333 MLB swings to predict a miss from velocity, spin, movement, release point, extension, arm angle and separation from the pitcher's primary fastball. Validated on pitchers held out of training (ROC AUC 0.641). Every bullpen pitch is scored individually, so date filtering re-averages exact model outputs. Location and count are left out on purpose, so the score reflects the pitch itself ("stuff").</p>
+    <p><b>Whiff model.</b> Gradient-boosted classifier trained on 336,333 MLB swings to predict a miss from velocity, spin, movement, release point, extension, arm angle and separation from the pitcher's primary fastball. Validated on pitchers held out of training (ROC AUC 0.641). Every bullpen pitch is scored individually, so date filtering re-averages exact model outputs. Location and count are left out on purpose, so the prediction reflects the pitch's shape and velocity, not how it was located.</p>
   </div>
 </main>
 <footer>Built by Reed Interdonato · Python, pandas, scikit-learn, Plotly · data: MLB Statcast / Baseball Savant ·
@@ -133,7 +134,6 @@ function arsenal(pitches) {
       ext: mean(ps.map(p => p.ext)), x: mean(ps.map(p => p.x))};
     if (fbM) { a.dv = a.velo - fbM.v; a.di = a.ivb - fbM.ivb; a.dh = a.hb - fbM.hb; }
     const fam = D.fam[a.group];
-    a.plus = 100 * a.x / fam.xmean;
     a.pct = 100 * fam.xs.filter(v => v < a.x).length / fam.xs.length;
     return a;
   }).sort((a, b) => b.n - a.n);
@@ -155,8 +155,8 @@ function comps(a, k = 5) {
 
 function notes(ars) {
   const out = [];
-  const best = ars.reduce((x, y) => (y.plus > x.plus ? y : x));
-  out.push(`<b>Best bat-misser:</b> the ${best.name.toLowerCase()} projects a ${f(best.x, 0)}% whiff rate, ${f(best.plus, 0)} Whiff+ (better than ${f(best.pct, 0)}% of MLB ${best.group} pitches).`);
+  const best = ars.reduce((x, y) => (y.pct > x.pct ? y : x));
+  out.push(`<b>Best bat-misser:</b> the ${best.name.toLowerCase()} projects a ${f(best.x, 0)}% whiff rate, better than ${f(best.pct, 0)}% of MLB ${best.group} pitches.`);
   ars.forEach(a => {
     const T = D.types[a.t];
     if (a.group === "fastball" || a.dv == null || !T) return;
@@ -209,15 +209,15 @@ function render() {
   $("#body").hidden = !pitches.length; $("#none").hidden = !!pitches.length;
   if (!pitches.length) return;
   const ars = arsenal(pitches);
-  const best = ars.reduce((x, y) => (y.plus > x.plus ? y : x));
+  const best = ars.reduce((x, y) => (y.pct > x.pct ? y : x));
   $("#tN").textContent = pitches.length;
   $("#tVelo").textContent = `${f(Math.max(...pitches.map(p => p.v)))} mph`;
   $("#tBest").textContent = best.name;
-  $("#tPlus").textContent = f(best.plus, 0);
-  $("#arsenal").innerHTML = `<tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB (arm +)</th><th>Ext</th><th>xWhiff</th><th>Whiff+</th></tr>` +
+  $("#tPlus").textContent = `${f(best.x)}%`;
+  $("#arsenal").innerHTML = `<tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB (arm +)</th><th>Ext</th><th>xWhiff</th><th>MLB percentile</th></tr>` +
     ars.map(a => `<tr><td><span class="dot" style="background:${D.colors[a.t] || "#555"}"></span>${esc(a.name)}</td><td>${a.n}</td>
       <td>${f(a.velo)}</td><td>${f(a.vmax)}</td><td>${f(a.spin, 0)}</td><td>${f(a.ivb)}</td><td>${f(a.hb)}</td><td>${f(a.ext)}</td>
-      <td>${f(a.x)}%</td><td><span class="plus" style="background:${plusColor(a.plus)}">${f(a.plus, 0)}</span></td></tr>`).join("");
+      <td>${f(a.x)}%</td><td><span class="plus" style="background:${plusColor(50 + a.pct)}">${f(a.pct, 0)}</span></td></tr>`).join("");
   $("#notes").innerHTML = notes(ars).map(s => `<li>${s}</li>`).join("");
   $("#comps").innerHTML = ars.map(a => `<div class="card"><h3><span class="dot" style="background:${D.colors[a.t] || "#555"}"></span>${esc(a.name)}
       <small>${f(a.velo)} mph · IVB ${f(a.ivb)} · HB ${f(a.hb)}</small></h3>
@@ -230,15 +230,15 @@ function render() {
 
 function pick(name) {
   who = name;
-  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.name === name));
+  $("#who").value = name;
   const [lo, hi] = dateBounds();
   for (const el of [$("#from"), $("#to")]) { el.min = lo; el.max = hi; }
   $("#from").value = lo; $("#to").value = hi;
   render();
 }
 
-$("#tabs").innerHTML = names.map(n => `<button type="button" data-name="${esc(n)}">${esc(n)} <span style="opacity:.6;font-weight:400">${D.pitchers[n].hand}</span></button>`).join("");
-document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => pick(b.dataset.name));
+$("#who").innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)} (${D.pitchers[n].hand})</option>`).join("");
+$("#who").onchange = e => pick(e.target.value);
 $("#from").onchange = render; $("#to").onchange = render;
 $("#all").onclick = () => { const [lo, hi] = dateBounds(); $("#from").value = lo; $("#to").value = hi; render(); };
 pick(who);

@@ -56,10 +56,9 @@ def movement_chart(pitches, a, ref):
 
 def insights(a: pd.DataFrame, ref: pd.DataFrame) -> list[str]:
     out = []
-    best = a.loc[a["whiff_plus"].idxmax()]
+    best = a.loc[a["pctile"].idxmax()]
     out.append(f"<b>Best bat-misser:</b> your {best['pitch_name'].lower()} projects a {best['xwhiff']:.0f}% "
-               f"whiff rate, {best['whiff_plus']:.0f} Whiff+ (better than {best['pctile']:.0f}% of MLB "
-               f"{best['group']} pitches).")
+               f"whiff rate, better than {best['pctile']:.0f}% of MLB {best['group']} pitches.")
     for _, r in a.iterrows():
         if r["group"] == "fastball" or pd.isna(r["d_velo"]):
             continue
@@ -98,8 +97,8 @@ def build_report(csv_path: str, out_path: str, year: int = 2025) -> Path:
     rows = "".join(f"""<tr><td><span class="dot" style="background:{COLORS.get(r.pitch_type, '#555')}"></span>
         {html.escape(r.pitch_name)}</td><td>{r.n}</td><td>{fmt(r.velo)}</td><td>{fmt(r.velo_max)}</td>
         <td>{fmt(r.spin, 0)}</td><td>{fmt(r.ivb)}</td><td>{fmt(r.hb)}</td><td>{fmt(r.ext)}</td>
-        <td>{fmt(r.xwhiff)}%</td><td><span class="plus" style="--p:{min(max(r.whiff_plus, 50), 150)}">
-        {r.whiff_plus:.0f}</span></td></tr>""" for r in a.itertuples())
+        <td>{fmt(r.xwhiff)}%</td><td><span class="plus" style="--p:{min(max(50 + r.pctile, 50), 150)}">
+        {r.pctile:.0f}</span></td></tr>""" for r in a.itertuples())
 
     comp_blocks = []
     for _, r in a.iterrows():
@@ -118,8 +117,8 @@ def build_report(csv_path: str, out_path: str, year: int = 2025) -> Path:
     notes = "".join(f"<li>{s}</li>" for s in insights(a, ref))
     page = TEMPLATE.format(
         who=html.escape(who), hand=hand, date=html.escape(date), n=len(pitches), types=len(a),
-        top_velo=fmt(pitches["velo"].max()), best=html.escape(a.loc[a["whiff_plus"].idxmax(), "pitch_name"]),
-        best_plus=f"{a['whiff_plus'].max():.0f}", rows=rows, chart=chart, notes=notes,
+        top_velo=fmt(pitches["velo"].max()), best=html.escape(a.loc[a["pctile"].idxmax(), "pitch_name"]),
+        best_plus=f"{a.loc[a['pctile'].idxmax(), 'xwhiff']:.1f}%", rows=rows, chart=chart, notes=notes,
         comps="".join(comp_blocks), year=meta["year"], pitchers=f"{meta['pitchers']:,}",
         swings=f"{meta['swings']:,}", auc=meta["holdout_auc"], allp=f"{meta['pitches']:,}")
     out = Path(out_path)
@@ -172,15 +171,15 @@ footer {{ color:var(--ink2); font-size:12px; text-align:center; padding:24px 16p
     <div class="tile"><div class="l">Top velo</div><div class="v">{top_velo} mph</div></div>
     <div class="tile"><div class="l">Pitch types</div><div class="v">{types}</div></div>
     <div class="tile"><div class="l">Best bat-misser</div><div class="v" style="font-size:20px">{best}</div></div>
-    <div class="tile"><div class="l">Its Whiff+</div><div class="v">{best_plus}</div></div>
+    <div class="tile"><div class="l">Its xWhiff</div><div class="v">{best_plus}</div></div>
   </div>
 
   <h2>Arsenal</h2>
   <div class="card"><table>
-    <tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB (arm +)</th><th>Ext</th><th>xWhiff</th><th>Whiff+</th></tr>
+    <tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB (arm +)</th><th>Ext</th><th>xWhiff</th><th>MLB percentile</th></tr>
     {rows}</table>
     <p class="method">xWhiff = predicted swing-and-miss rate from shape, release and separation off your fastball.
-    Whiff+ = 100 × xWhiff / MLB average for that pitch family (100 is league average, 120 is 20% better).</p></div>
+    MLB percentile = share of MLB pitches in the same family with a lower xWhiff.</p></div>
 
   <h2>Movement profile</h2>
   <div class="card">{chart}
@@ -196,7 +195,7 @@ footer {{ color:var(--ink2); font-size:12px; text-align:center; padding:24px 16p
   <div class="card method">
     <p><b>Data.</b> {allp} regular-season pitches from {pitchers} MLB pitchers ({year} Statcast via Baseball Savant), aggregated to one row per pitcher and pitch type (min. 100 pitches).</p>
     <p><b>Comps.</b> Standardized distance on velocity, induced vertical break, horizontal break, spin, release height and extension within the same pitch family; movement weighted most.</p>
-    <p><b>Whiff model.</b> Gradient-boosted classifier trained on {swings} MLB swings to predict a miss from velocity, spin, movement, release point, extension, arm angle and separation from the pitcher's primary fastball. Validated on pitchers held out of training (ROC AUC {auc}). Location and count are left out on purpose, so the score reflects the pitch itself ("stuff"), not how it was located.</p>
+    <p><b>Whiff model.</b> Gradient-boosted classifier trained on {swings} MLB swings to predict a miss from velocity, spin, movement, release point, extension, arm angle and separation from the pitcher's primary fastball. Validated on pitchers held out of training (ROC AUC {auc}). Location and count are left out on purpose, so the prediction reflects the pitch's shape and velocity, not how it was located.</p>
   </div>
 </main>
 <footer>Built by Reed Interdonato · Python, pandas, scikit-learn, Plotly · data: MLB Statcast / Baseball Savant</footer>
