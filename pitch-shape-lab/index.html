@@ -227,7 +227,7 @@ function render() {
   $("#tVelo").textContent = `${f(Math.max(...pitches.map(p => p.v)))} mph`;
   $("#tBest").textContent = best.name;
   $("#tPlus").textContent = f(best.stuff, 0);
-  $("#arsenal").innerHTML = `<tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB (arm +)</th><th>Ext</th><th>Stuff+</th></tr>` +
+  $("#arsenal").innerHTML = `<tr><th>Pitch</th><th>#</th><th>Velo</th><th>Max</th><th>Spin</th><th>IVB</th><th>HB</th><th>Ext</th><th>Stuff+</th></tr>` +
     ars.map(a => `<tr><td><span class="dot" style="background:${D.colors[a.t] || "#555"}"></span>${esc(a.name)}</td><td>${a.n}</td>
       <td>${f(a.velo)}</td><td>${f(a.vmax)}</td><td>${f(a.spin, 0)}</td><td>${f(a.ivb)}</td><td>${f(a.hb)}</td><td>${f(a.ext)}</td>
       <td><span class="plus" style="background:${plusColor(a.stuff)}">${f(a.stuff, 0)}</span></td></tr>`).join("");
